@@ -11,7 +11,7 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/user', userRoutes);
+app.use('/users', userRoutes);
 
 app.get('/', (req, res) => {
   res.send('Hello world');

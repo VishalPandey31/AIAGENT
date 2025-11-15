@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
-
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 const userSchema= new mongoose.Schema({
 
     email:{
@@ -24,7 +25,7 @@ userSchema.static.hashpassword= async function (password){
 userSchema.methods.isvalidpassword= async function (password){
     return await bcrypt.compare(password, this.password);
 }
-userSchema.methods.generateJWT= function (password){
+userSchema.methods.generateJWT= function (){
     return jwt.sign ({email:this.email},process.env.JWT_SECRET);
 }
 
