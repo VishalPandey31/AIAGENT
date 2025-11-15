@@ -1,13 +1,20 @@
+import morgan from 'morgan';
+import connect from './db/db.js';   // ✅ CORRECT
+import express from 'express';
+import userRoutes from './routes/user.routes.js';
 
+connect();
 
- import express from 'express';
- const app= express();
+const app = express();
 
- app.use(express.json());
- app.use(express.urlencoded({extended:true}));
+app.use(morgan('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
- app.get('/',(req,res)=> {
-   res.send('Hello world');
- });
+app.use('/user', userRoutes);
+
+app.get('/', (req, res) => {
+  res.send('Hello world');
+});
 
 export default app;
