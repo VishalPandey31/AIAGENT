@@ -5,39 +5,27 @@ import jwt from "jsonwebtoken";
 import redisclient from "../services/redis.service.js";
 
 export const createUserController = async (req, res) => {
-  // 1) Validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    // Send detailed validation errors
     return res.status(400).json({ errors: errors.array() });
   }
 
   try {
-    // 2) Create the user via service
     const user = await userService.createUser(req.body);
 
-    // 3) Generate token (assuming generateJWT is a method on user)
     const token = await user.generateJWT();
-
-    // 4) Return response
-    return res.status(201).json({
-      msg: "User created successfully",
-      user: {
-        id: user._id,
-        email: user.email,
-        // any other properties you want to send
-      },
-      token,
-    });
+    delete user._doc.password;
+   
+    return res.status(201).json({user, token});
   } catch (error) {
-    console.error("Error in createUserController:", error);
-    // If service throws a specific error, you can handle it differently
-    return res.status(400).json({ msg: error.message });
+    return res.status(400).json(error.message);
   }
 };
 
+// ===============================
+// LOGIN USER
+// ===============================
 export const loginController = async (req, res) => {
-  // 1) Validation
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -46,49 +34,60 @@ export const loginController = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 2) Find user (with password)
+    // 1) Find user
     const user = await userModel.findOne({ email }).select("+password");
     if (!user) {
-      return res.status(401).json({ msg: "Invalid credentials" });
+      return res.status(401).json({ errors: "Invalid credentials" });
     }
 
-    // 3) Check password
+    // 2) Compare password
     const isMatch = await user.isvalidpassword(password);
     if (!isMatch) {
       return res.status(401).json({ msg: "Invalid credentials" });
     }
+    // delete user._doc.password;
 
-    // 4) Generate token
+    // 3) Generate token
     const token = jwt.sign(
       { id: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
-    // 5) Prepare clean user object
+    // 4) Clean user object
     const cleanUser = user.toObject();
     delete cleanUser.password;
 
-    return res.status(200).json({ msg: "Login successful", user: cleanUser, token });
+
+    return res.status(200).json({
+      msg: "Login successful",
+      user: cleanUser,
+      token,
+    });
   } catch (err) {
     console.error("Error in loginController:", err);
     return res.status(500).json({ msg: "Internal server error", error: err.message });
   }
 };
 
+// ===============================
+// USER PROFILE
+// ===============================
 export const profileController = async (req, res) => {
-  // Assuming auth middleware attaches user to req.user
   return res.status(200).json({ user: req.user });
 };
 
+// ===============================
+// LOGOUT USER
+// ===============================
 export const logoutcontroller = async (req, res) => {
   try {
-    // 1) Extract token — either from cookie or header
     const authHeader = req.headers.authorization;
     let token;
+
     if (authHeader && authHeader.startsWith("Bearer ")) {
       token = authHeader.split(" ")[1];
-    } else if (req.cookies && req.cookies.token) {
+    } else if (req.cookies?.token) {
       token = req.cookies.token;
     }
 
@@ -96,23 +95,19 @@ export const logoutcontroller = async (req, res) => {
       return res.status(400).json({ msg: "No token found for logout" });
     }
 
-    // 2) Blacklist the token in Redis
-    // Set the token as “revoked” with expiry same as token’s expiry
-    // Assuming token TTL from payload or set a default TTL
     const decoded = jwt.decode(token);
     const exp = decoded?.exp;
+
     if (exp) {
       const ttl = exp - Math.floor(Date.now() / 1000);
-      if (ttl > 0) {
-        await redisclient.set(token, "revoked", "EX", ttl);
-      } else {
-        // token already expired
-        await redisclient.set(token, "revoked", "EX", 60 * 60); // 1 hour fallback
-      }
+      await redisclient.set(token, "revoked", "EX", ttl > 0 ? ttl : 3600);
     } else {
-      // No exp in token — set a reasonable expiry
-      await redisclient.set(token, "revoked", "EX", 60 * 60 * 24); // 24h
+      await redisclient.set(token, "revoked", "EX", 86400);
     }
+
+    console.log("========= LOGOUT =========");
+    console.log("Token revoked:", token);
+    console.log("===========================");
 
     return res.status(200).json({ msg: "Logged out successfully" });
   } catch (err) {
