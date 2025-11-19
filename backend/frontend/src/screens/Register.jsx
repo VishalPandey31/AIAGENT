@@ -1,39 +1,43 @@
-import React, { useState } from "react";
+import React, { useState, useContext } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "../config/axios";
+import { UserContext } from "../context/user.context";
 
 const Register = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { setUser } = useContext(UserContext);
 
   const navigate = useNavigate();
 
-  async function submitHandler(e) {
+  function submitHandler(e) {
     e.preventDefault();
-    setError("");
-    setLoading(true);
 
-    try {
-      const res = await axios.post("/users/register", {
+    setError("");
+
+    axios
+      .post("/users/register", {
         email,
         password,
+      })
+      .then((res) => {
+        console.log("REGISTER RESPONSE:", res.data);
+
+        // Save token
+        localStorage.setItem("token", res.data.token);
+
+        // save user in context
+        setUser(res.data.user);
+
+        // redirect
+        navigate("/");
+      })
+      .catch((err) => {
+        console.log("REGISTER ERROR:", err.response?.data);
+        setError(err.response?.data?.msg || "Registration failed");
       });
-
-      console.log("Response:", res.data);
-
-      // TOKEN SAVE
-      localStorage.setItem("token", res.data.token);
-
-      // Redirect to login OR home
-      navigate("/login");
-    } catch (err) {
-      console.log("Backend Error:", err.response?.data);
-      setError(err.response?.data?.msg || "Registration failed");
-    } finally {
-      setLoading(false);
-    }
   }
 
   return (
@@ -43,7 +47,7 @@ const Register = () => {
         <h2 className="text-2xl font-bold text-white mb-6">Create Account</h2>
 
         {error && (
-          <p className="mb-4 text-red-400 bg-red-900/40 p-2 rounded">
+          <p className="text-red-400 bg-red-900/40 p-2 rounded mb-4">
             {error}
           </p>
         )}
@@ -77,14 +81,9 @@ const Register = () => {
 
           <button
             type="submit"
-            disabled={loading}
-            className={`w-full text-white p-2 rounded transition duration-200 ${
-              loading
-                ? "bg-blue-400 cursor-not-allowed"
-                : "bg-blue-500 hover:bg-blue-600"
-            }`}
+            className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition duration-200"
           >
-            {loading ? "Registering..." : "Register"}
+            Register
           </button>
         </form>
 
