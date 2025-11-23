@@ -1,118 +1,78 @@
-import React, { useContext } from "react";
-import { UserContext } from "../context/user.context";
-import axiosInstance from '../config/axios';
+import React, { useState, useContext } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import axios from '../config/axios'
+import { UserContext } from '../context/user.context'
 
-const Home = () => {
-  const { user } = useContext(UserContext);
+const Login = () => {
 
-  const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [projectName, setProjectName] = React.useState("");
 
-  const openModal = () => setIsModalOpen(true);
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setProjectName("");
-  };
+    const [ email, setEmail ] = useState('')
+    const [ password, setPassword ] = useState('')
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+    const { setUser } = useContext(UserContext)
 
-    if (!projectName.trim()) return;
+    const navigate = useNavigate()
 
-    console.log("Creating project:", projectName);
+    function submitHandler(e) {
 
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        console.error("No token found, user not logged in");
-        return;
-      }
+        e.preventDefault()
 
-      const res = await axiosInstance.post(
-        '/projects/create',
-        { name: projectName },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,   // 🔥 IMPORTANT
-          }
-        }
-      );
+        axios.post('/users/login', {
+            email,
+            password
+        }).then((res) => {
+            console.log(res.data)
 
-      console.log("Project created:", res.data);
-    } catch (error) {
-      console.error("Error creating project:", error);
+            localStorage.setItem('token', res.data.token)
+            setUser(res.data.user)
+
+            navigate('/')
+        }).catch((err) => {
+            console.log(err.response.data)
+        })
     }
 
-    closeModal();
-  };
-
-  return (
-    <main className="p-4">
-      <div className="projects flex items-center gap-4">
-        <button
-          onClick={openModal}
-          className="project p-4 border border-slate-300 rounded-md bg-white hover:bg-slate-50 transition flex items-center gap-2"
-        >
-          New Project
-          <i className="ri-link"></i>
-        </button>
-      </div>
-
-      {isModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-          role="dialog"
-          aria-modal="true"
-          onClick={closeModal}
-        >
-          <div
-            className="bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6 relative"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={closeModal}
-              className="absolute top-3 right-3 text-slate-500 hover:text-slate-700"
-              aria-label="Close modal"
-            >
-              ×
-            </button>
-
-            <h2 className="text-lg font-semibold mb-4">Create Project</h2>
-
-            <form onSubmit={handleSubmit}>
-              <label className="block text-sm font-medium text-slate-700">
-                Project Name
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  className="mt-2 w-full border border-slate-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter project name"
-                  required
-                />
-              </label>
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-900">
+            <div className="bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md">
+                <h2 className="text-2xl font-bold text-white mb-6">Login</h2>
+                <form
+                    onSubmit={submitHandler}
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                >
-                  Create
-                </button>
-              </div>
-            </form>
-          </div>
+                    <div className="mb-4">
+                        <label className="block text-gray-400 mb-2" htmlFor="email">Email</label>
+                        <input
+
+                            onChange={(e) => setEmail(e.target.value)}
+                            type="email"
+                            id="email"
+                            className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter your email"
+                        />
+                    </div>
+                    <div className="mb-6">
+                        <label className="block text-gray-400 mb-2" htmlFor="password">Password</label>
+                        <input
+                            onChange={(e) => setPassword(e.target.value)}
+                            type="password"
+                            id="password"
+                            className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter your password"
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        className="w-full p-3 rounded bg-blue-500 text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        Login
+                    </button>
+                </form>
+                <p className="text-gray-400 mt-4">
+                    Don't have an account? <Link to="/register" className="text-blue-500 hover:underline">Create one</Link>
+                </p>
+            </div>
         </div>
-      )}
-    </main>
-  );
-};
+    )
+}
 
-export default Home;
+export default Login
