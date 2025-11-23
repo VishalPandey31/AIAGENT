@@ -1,16 +1,11 @@
-import React, { createContext, useState, useContext } from 'react';
+import { WebContainer } from '@webcontainer/api';
 
-// Create the UserContext
-export const UserContext = createContext();
+let webContainerInstance = null;
 
-// Create a provider component
-export const UserProvider = ({ children }) => {
-    const [ user, setUser ] = useState(null);
 
-    return (
-        <UserContext.Provider value={{ user, setUser }}>
-            {children}
-        </UserContext.Provider>
-    );
-};
-
+export const getWebContainer = async () => {
+    if (webContainerInstance === null) {
+        webContainerInstance = await WebContainer.boot();
+    }
+    return webContainerInstance;
+}
