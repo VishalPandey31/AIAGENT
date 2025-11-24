@@ -19,3 +19,7 @@ html,body{
 .message-box{
   scroll-behavior: smooth;
 }
+.break-words {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
