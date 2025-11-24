@@ -9,102 +9,101 @@ import { generateResult } from './services/ai.service.js';
 
 const port = process.env.PORT || 3000;
 
+if (!process.env.JWT_SECRET) {
+    console.error("❌ ERROR: JWT_SECRET missing in .env");
+    process.exit(1);
+}
 
+if (!process.env.GEMINI_API_KEY) {
+    console.error("❌ ERROR: GEMINI_API_KEY missing in .env");
+    process.exit(1);
+}
 
 const server = http.createServer(app);
+
 const io = new Server(server, {
     cors: {
         origin: '*'
     }
 });
 
-
+// -------------------------
+// SOCKET AUTH MIDDLEWARE
+// -------------------------
 io.use(async (socket, next) => {
-
     try {
+        // Token handling safely
+        const authHeader = socket.handshake.headers.authorization;
+        const token =
+            socket.handshake.auth?.token ||
+            (authHeader ? authHeader.split(" ")[1] : null);
 
-        const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(' ')[ 1 ];
         const projectId = socket.handshake.query.projectId;
 
-        if (!mongoose.Types.ObjectId.isValid(projectId)) {
-            return next(new Error('Invalid projectId'));
+        if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) {
+            return next(new Error("Invalid projectId"));
         }
 
+        const project = await projectModel.findById(projectId);
+        if (!project) return next(new Error("Project not found"));
 
-        socket.project = await projectModel.findById(projectId);
-
+        socket.project = project;
 
         if (!token) {
-            return next(new Error('Authentication error'))
+            return next(new Error("Authentication error: Token missing"));
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        if (!decoded) {
-            return next(new Error('Authentication error'))
-        }
-
-
         socket.user = decoded;
 
         next();
-
     } catch (error) {
-        next(error)
+        console.error("Socket Auth Error:", error.message);
+        next(new Error("Authentication failed"));
     }
+});
 
-})
+// -------------------------
+// SOCKET EVENTS
+// -------------------------
+io.on("connection", socket => {
+    socket.roomId = socket.project._id.toString();
 
-// yeh roomid ke wajhese na dono user ka message ek dusre ko dikh rha h
-
-io.on('connection', socket => {
-    socket.roomId = socket.project._id.toString()
-
-
-    console.log('a user connected');
-
-
+    console.log("✅ User connected:", socket.user.email);
 
     socket.join(socket.roomId);
 
-    socket.on('project-message', async data => {
-
+    socket.on("project-message", async data => {
         const message = data.message;
-        const aiIsPresentInMessage = message.includes('@ai');
-        socket.broadcast.to(socket.roomId).emit('project-message', data)
+        const aiIsPresentInMessage = message.includes("@ai");
+
+        // Broadcast user message to others
+        socket.broadcast.to(socket.roomId).emit("project-message", data);
 
         if (aiIsPresentInMessage) {
-
-
-            const prompt = message.replace('@ai', '');
+            const prompt = message.replace("@ai", "").trim();
 
             const result = await generateResult(prompt);
 
-
-            io.to(socket.roomId).emit('project-message', {
+            io.to(socket.roomId).emit("project-message", {
                 message: result,
                 sender: {
-                    _id: 'ai',
-                    email: 'AI'
+                    _id: "ai",
+                    email: "AI"
                 }
-            })
+            });
 
-
-            return
+            return;
         }
+    });
 
-
-    })
-
-    socket.on('disconnect', () => {
-        console.log('user disconnected');
-        socket.leave(socket.roomId)
+    socket.on("disconnect", () => {
+        console.log("❌ User disconnected");
+        socket.leave(socket.roomId);
     });
 });
 
-
-
-
+// -------------------------
 server.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-})
+    console.log(`🚀 Server running on port ${port}`);
+});
