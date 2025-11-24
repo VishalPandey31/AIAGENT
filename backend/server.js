@@ -55,6 +55,7 @@ io.use(async (socket, next) => {
 
 })
 
+// yeh roomid ke wajhese na dono user ka message ek dusre ko dikh rha h
 
 io.on('connection', socket => {
     socket.roomId = socket.project._id.toString()
@@ -69,7 +70,6 @@ io.on('connection', socket => {
     socket.on('project-message', async data => {
 
         const message = data.message;
-
         const aiIsPresentInMessage = message.includes('@ai');
         socket.broadcast.to(socket.roomId).emit('project-message', data)
 
