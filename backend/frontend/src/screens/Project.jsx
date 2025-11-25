@@ -25,14 +25,14 @@ function SyntaxHighlightedCode(props) {
 // ✅ SAFE JSON PARSER (fixes JSON.parse error)
 function safeParseJSON(text) {
     if (!text) return { text: "" };
-
     try {
-        const cleaned = text.replace(/^```json\s*|```$/g, "").trim();
+        const cleaned = text.replace(/^\s*```json\s*|```$/g, "").trim();
         return JSON.parse(cleaned);
     } catch (err) {
         return { text }; // fallback plain text
     }
 }
+
 
 const Project = () => {
     const location = useLocation()
@@ -86,22 +86,58 @@ const Project = () => {
     }
 
     // 🔥 UPDATED — SAFE VERSION
-    function WriteAiMessage(message) {
-        const data = safeParseJSON(message);
+   function WriteAiMessage(messageOrParsed) {
+    // messageOrParsed could be:
+    // - already parsed object ({ fileTree:..., text: "...", ... })
+    // - or an object like { text: "markdown..." }
+    const data = messageOrParsed && typeof messageOrParsed === 'object'
+        ? (messageOrParsed.text ? messageOrParsed : messageOrParsed)
+        : { text: String(messageOrParsed ?? "") };
 
-        return (
-<div className='overflow-auto bg-slate-950 text-white rounded-sm p-2 break-words'>
-                <Markdown
-                    children={data.text}
-                    options={{
-                        overrides: {
-                            code: SyntaxHighlightedCode,
-                        },
-                    }}
-                />
-            </div>
-        )
+    return (
+        <div className='overflow-auto bg-slate-950 text-white rounded-sm p-2 break-words'>
+            <Markdown
+                children={data.text}
+                options={{
+                    overrides: {
+                        code: SyntaxHighlightedCode,
+                    },
+                }}
+            />
+        </div>
+    );
+}
+// Ensure hljs reference available globally
+useEffect(() => {
+    window.hljs = hljs;
+    try {
+        hljs.configure({ ignoreUnescapedHTML: true });
+    } catch (e) {
+        // older versions might not have configure
+        console.warn("hljs configure: ", e);
     }
+}, []);
+
+// Run highlighting after messages change
+useEffect(() => {
+    // small delay ensures DOM nodes mounted by react-markdown
+    const id = setTimeout(() => {
+        document.querySelectorAll('pre code').forEach(block => {
+            try {
+                // use highlightElement which is the modern API
+                if (window.hljs && typeof window.hljs.highlightElement === 'function') {
+                    window.hljs.highlightElement(block);
+                } else if (window.hljs && typeof window.hljs.highlightBlock === 'function') {
+                    window.hljs.highlightBlock(block); // fallback
+                }
+            } catch (err) {
+                console.warn("hljs highlight error:", err);
+            }
+        });
+    }, 50);
+
+    return () => clearTimeout(id);
+}, [messages]);
 
     useEffect(() => {
         initializeSocket(project._id)
@@ -118,24 +154,41 @@ const Project = () => {
                 })
         }
 
-        receiveMessage('project-message', data => {
-            console.log("Incoming:", data)
+        receiveMessage('project-message', rawData => {
+    console.log("Incoming:", rawData)
 
-            if (data.sender._id === 'ai') {
-                const parsed = safeParseJSON(data.message)
+    // rawData.message might be:
+    // 1) a plain string (Markdown or text)
+    // 2) a JSON string wrapped in ```json fences
+    // 3) already a parsed object (if server sent object)
+    const data = { ...rawData } // shallow copy
 
-                if (parsed.fileTree) {
-                    try {
-                        webContainer?.mount(parsed.fileTree)
-                        setFileTree(parsed.fileTree)
-                    } catch (err) {
-                        console.warn("Mount failed:", err)
-                    }
-                }
-            }
+    // Normalize message: if message is an object already, keep it.
+    // If it's a string, try to safely parse JSON inside fences or fallback to text
+    if (typeof data.message === 'string') {
+        // safeParseJSON returns object or { text }
+        const parsed = safeParseJSON(data.message)
+        // If parsed is an object and contains meaningful keys, use it.
+        // We'll keep both parsed and raw text available:
+        data.parsedMessage = parsed
+        data.plainText = parsed.text ?? data.message
+    } else {
+        data.parsedMessage = data.message
+        data.plainText = typeof data.message === 'object' ? JSON.stringify(data.message) : String(data.message)
+    }
 
-            setMessages(prev => [...prev, data])
-        })
+    // If backend sends fileTree inside parsed JSON, mount it
+    if (data.parsedMessage && data.parsedMessage.fileTree) {
+        try {
+            webContainer?.mount(data.parsedMessage.fileTree)
+            setFileTree(data.parsedMessage.fileTree)
+        } catch (err) {
+            console.warn("Mount failed:", err)
+        }
+    }
+
+    setMessages(prev => [...prev, data])
+})
 
         axios.get(`/projects/get-project/${location.state.project._id}`)
             .then(res => {
@@ -149,7 +202,7 @@ const Project = () => {
 
     }, [])
 
-    function saveFileTree(ft) {
+    function saveFileTree(ft) { 
         axios.put('/projects/update-file-tree', {
             projectId: project._id,
             fileTree: ft
@@ -174,12 +227,16 @@ const Project = () => {
                         ref={messageBox}
                         className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto max-h-full scrollbar-hide">
                         {messages.map((msg, index) => (
-                            <div key={index} className={`${msg.sender._id === 'ai' ? 'max-w-80' : 'max-w-52'} ${msg.sender._id == user._id.toString() && 'ml-auto'}  message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
+                            <div key={index} className={`${msg.sender._id === 'ai' ? 'max-w-96' : 'max-w-52'} ${msg.sender._id == user._id.toString() && 'ml-auto'}  message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
                                 <small className='opacity-65 text-xs'>{msg.sender.email}</small>
                                 <div className='text-sm'>
-                                    {msg.sender._id === 'ai' ?
-                                        WriteAiMessage(msg.message)
-                                        : <p>{msg.message}</p>}
+{msg.sender._id === 'ai' ? (
+    // Use parsed content if available, else raw plainText
+    WriteAiMessage(msg.parsedMessage ?? { text: msg.plainText ?? msg.message })
+) : (
+    <p>{msg.message}</p>
+)}
+
                                 </div>
                             </div>
                         ))}
@@ -321,19 +378,20 @@ const Project = () => {
                                             className="hljs h-full outline-none"
                                             contentEditable
                                             suppressContentEditableWarning
-                                            onBlur={(e) => {
-                                                const updatedContent = e.target.innerText;
-                                                const ft = {
-                                                    ...fileTree,
-                                                    [ currentFile ]: {
-                                                        file: {
-                                                            contents: updatedContent
-                                                        }
-                                                    }
-                                                }
-                                                setFileTree(ft)
-                                                saveFileTree(ft)
-                                            }}
+                                           onBlur={(e) => {
+    const updatedContent = e.target.innerText;
+    const ft = {
+        ...fileTree,
+        [ currentFile ]: {
+            file: {
+                contents: updatedContent
+            }
+        }
+    }
+    setFileTree(ft)
+    saveFileTree(ft)
+}}
+
                                             dangerouslySetInnerHTML={{ __html: hljs.highlight('javascript', fileTree[ currentFile ].file.contents).value }}
                                             style={{
                                                 whiteSpace: 'pre-wrap',

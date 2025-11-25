@@ -9,6 +9,9 @@ import { generateResult } from './services/ai.service.js';
 
 const port = process.env.PORT || 3000;
 
+// -------------------------
+// ENV CHECKS
+// -------------------------
 if (!process.env.JWT_SECRET) {
     console.error("❌ ERROR: JWT_SECRET missing in .env");
     process.exit(1);
@@ -19,6 +22,7 @@ if (!process.env.GEMINI_API_KEY) {
     process.exit(1);
 }
 
+// -------------------------
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -32,8 +36,8 @@ const io = new Server(server, {
 // -------------------------
 io.use(async (socket, next) => {
     try {
-        // Token handling safely
         const authHeader = socket.handshake.headers.authorization;
+
         const token =
             socket.handshake.auth?.token ||
             (authHeader ? authHeader.split(" ")[1] : null);
@@ -75,18 +79,31 @@ io.on("connection", socket => {
 
     socket.on("project-message", async data => {
         const message = data.message;
-        const aiIsPresentInMessage = message.includes("@ai");
+        const aiIsPresent = message.includes("@ai");
 
-        // Broadcast user message to others
+        // Broadcast user message to other users
         socket.broadcast.to(socket.roomId).emit("project-message", data);
 
-        if (aiIsPresentInMessage) {
+        // -------------------------
+        // AI MESSAGE TRIGGER
+        // -------------------------
+        if (aiIsPresent) {
             const prompt = message.replace("@ai", "").trim();
 
-            const result = await generateResult(prompt);
+            let result = await generateResult(prompt);
 
+            // Extract text if AI returned { text: "..."}
+            let text = result?.text || result;
+
+            // Remove ``` or ```json markdown blocks
+            text = String(text)
+                .replace(/```json/gi, "")
+                .replace(/```+/g, "")
+                .trim();
+
+            // Emit AI response
             io.to(socket.roomId).emit("project-message", {
-                message: result,
+                message: text,
                 sender: {
                     _id: "ai",
                     email: "AI"
