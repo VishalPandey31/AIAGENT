@@ -31,6 +31,15 @@ function safeParseJSON(text) {
         return { text };
     }
 }
+export const safeAIRequest = async (prompt) => {
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (err) {
+    console.log("AI Error:", err);
+    return "AI failed. Try again.";
+  }
+}
 
 const Project = () => {
     const location = useLocation()
@@ -333,7 +342,7 @@ const Project = () => {
                                         contentEditable
                                         suppressContentEditableWarning
                                         onBlur={(e) => {
-                                            const updatedContent = e.target.textContent;
+                                            const updatedContent = e.target.innerText;
                                             const ft = {
                                                 ...fileTree,
                                                 [currentFile]: {
