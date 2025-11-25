@@ -22,17 +22,16 @@ function SyntaxHighlightedCode(props) {
     return <code {...props} ref={ref} />
 }
 
-// ✅ SAFE JSON PARSER (fixes JSON.parse error)
 function safeParseJSON(text) {
     if (!text) return { text: "" };
+    if (text.includes("```")) return { text };
+
     try {
-        const cleaned = text.replace(/^\s*```json\s*|```$/g, "").trim();
-        return JSON.parse(cleaned);
-    } catch (err) {
-        return { text }; // fallback plain text
+        return JSON.parse(text);
+    } catch {
+        return { text };
     }
 }
-
 
 const Project = () => {
     const location = useLocation()
@@ -70,7 +69,6 @@ const Project = () => {
             projectId: location.state.project._id,
             users: Array.from(selectedUserId)
         }).then(res => {
-            console.log(res.data)
             setIsModalOpen(false)
         }).catch(console.log)
     }
@@ -85,110 +83,80 @@ const Project = () => {
         setMessage("")
     }
 
-    // 🔥 UPDATED — SAFE VERSION
-   function WriteAiMessage(messageOrParsed) {
-    // messageOrParsed could be:
-    // - already parsed object ({ fileTree:..., text: "...", ... })
-    // - or an object like { text: "markdown..." }
-    const data = messageOrParsed && typeof messageOrParsed === 'object'
-        ? (messageOrParsed.text ? messageOrParsed : messageOrParsed)
-        : { text: String(messageOrParsed ?? "") };
+    // RENDER AI MESSAGE
+    function WriteAiMessage(messageOrParsed) {
+        const data =
+            typeof messageOrParsed === "object"
+                ? messageOrParsed.text
+                    ? messageOrParsed
+                    : messageOrParsed
+                : { text: String(messageOrParsed ?? "") };
 
-    return (
-        <div className='overflow-auto bg-slate-950 text-white rounded-sm p-2 break-words'>
-            <Markdown
-                children={data.text}
-                options={{
-                    overrides: {
-                        code: SyntaxHighlightedCode,
-                    },
-                }}
-            />
-        </div>
-    );
-}
-// Ensure hljs reference available globally
-useEffect(() => {
-    window.hljs = hljs;
-    try {
-        hljs.configure({ ignoreUnescapedHTML: true });
-    } catch (e) {
-        // older versions might not have configure
-        console.warn("hljs configure: ", e);
+        return (
+            <div className='overflow-auto bg-slate-950 text-white rounded-sm p-2 break-words'>
+                <Markdown
+                    children={data.text}
+                    options={{
+                        overrides: {
+                            code: SyntaxHighlightedCode,
+                        },
+                    }}
+                />
+            </div>
+        );
     }
-}, []);
 
-// Run highlighting after messages change
-useEffect(() => {
-    // small delay ensures DOM nodes mounted by react-markdown
-    const id = setTimeout(() => {
-        document.querySelectorAll('pre code').forEach(block => {
-            try {
-                // use highlightElement which is the modern API
-                if (window.hljs && typeof window.hljs.highlightElement === 'function') {
-                    window.hljs.highlightElement(block);
-                } else if (window.hljs && typeof window.hljs.highlightBlock === 'function') {
-                    window.hljs.highlightBlock(block); // fallback
-                }
-            } catch (err) {
-                console.warn("hljs highlight error:", err);
-            }
-        });
-    }, 50);
+    useEffect(() => {
+        window.hljs = hljs;
+        try {
+            hljs.configure({ ignoreUnescapedHTML: true });
+        } catch { }
+    }, []);
 
-    return () => clearTimeout(id);
-}, [messages]);
+    useEffect(() => {
+        const id = setTimeout(() => {
+            document.querySelectorAll('pre code').forEach(block => {
+                try {
+                    if (window.hljs?.highlightElement) {
+                        hljs.highlightElement(block);
+                    }
+                } catch { }
+            });
+        }, 50);
+
+        return () => clearTimeout(id);
+    }, [messages]);
 
     useEffect(() => {
         initializeSocket(project._id)
 
-        // SAFE WEB CONTAINER INIT
         if (!webContainer) {
             getWebContainer()
-                .then(container => {
-                    setWebContainer(container)
-                    console.log("WebContainer started")
-                })
-                .catch(err => {
-                    console.warn("WebContainer failed:", err)
-                })
+                .then(container => setWebContainer(container))
+                .catch(console.warn)
         }
 
         receiveMessage('project-message', rawData => {
-    console.log("Incoming:", rawData)
+            const data = { ...rawData }
 
-    // rawData.message might be:
-    // 1) a plain string (Markdown or text)
-    // 2) a JSON string wrapped in ```json fences
-    // 3) already a parsed object (if server sent object)
-    const data = { ...rawData } // shallow copy
+            if (typeof data.message === 'string') {
+                const parsed = safeParseJSON(data.message)
+                data.parsedMessage = parsed
+                data.plainText = parsed.text ?? data.message
+            } else {
+                data.parsedMessage = data.message
+                data.plainText = JSON.stringify(data.message)
+            }
 
-    // Normalize message: if message is an object already, keep it.
-    // If it's a string, try to safely parse JSON inside fences or fallback to text
-    if (typeof data.message === 'string') {
-        // safeParseJSON returns object or { text }
-        const parsed = safeParseJSON(data.message)
-        // If parsed is an object and contains meaningful keys, use it.
-        // We'll keep both parsed and raw text available:
-        data.parsedMessage = parsed
-        data.plainText = parsed.text ?? data.message
-    } else {
-        data.parsedMessage = data.message
-        data.plainText = typeof data.message === 'object' ? JSON.stringify(data.message) : String(data.message)
-    }
+            if (data.parsedMessage?.fileTree) {
+                try {
+                    webContainer?.mount(data.parsedMessage.fileTree)
+                    setFileTree(data.parsedMessage.fileTree)
+                } catch { }
+            }
 
-    // If backend sends fileTree inside parsed JSON, mount it
-    if (data.parsedMessage && data.parsedMessage.fileTree) {
-        try {
-            webContainer?.mount(data.parsedMessage.fileTree)
-            setFileTree(data.parsedMessage.fileTree)
-        } catch (err) {
-            console.warn("Mount failed:", err)
-        }
-    }
-
-    setMessages(prev => [...prev, data])
-})
+            setMessages(prev => [...prev, data])
+        })
 
         axios.get(`/projects/get-project/${location.state.project._id}`)
             .then(res => {
@@ -202,12 +170,13 @@ useEffect(() => {
 
     }, [])
 
-    function saveFileTree(ft) { 
+    function saveFileTree(ft) {
         axios.put('/projects/update-file-tree', {
             projectId: project._id,
             fileTree: ft
         }).catch(console.log)
     }
+
 
     return (
         <main className='h-screen w-screen flex'>
@@ -221,109 +190,110 @@ useEffect(() => {
                         <i className="ri-group-fill"></i>
                     </button>
                 </header>
-                <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col h-full relative">
 
+                {/* CHAT AREA */}
+                <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col h-full relative">
                     <div
                         ref={messageBox}
                         className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto max-h-full scrollbar-hide">
-                        {messages.map((msg, index) => (
-                            <div key={index} className={`${msg.sender._id === 'ai' ? 'max-w-96' : 'max-w-52'} ${msg.sender._id == user._id.toString() && 'ml-auto'}  message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
-                                <small className='opacity-65 text-xs'>{msg.sender.email}</small>
-                                <div className='text-sm'>
-{msg.sender._id === 'ai' ? (
-    // Use parsed content if available, else raw plainText
-    WriteAiMessage(msg.parsedMessage ?? { text: msg.plainText ?? msg.message })
-) : (
-    <p>{msg.message}</p>
-)}
 
+                        {messages.map((msg, index) => (
+                            <div
+                                key={index}
+                                className={`${msg.sender._id === 'ai' ? 'max-w-96' : 'max-w-52'} ${msg.sender._id == user._id.toString() && 'ml-auto'}  
+                                message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
+
+                                <small className='opacity-65 text-xs'>{msg.sender.email}</small>
+
+                                <div className='text-sm'>
+                                    {msg.sender._id === 'ai'
+                                        ? WriteAiMessage(
+                                            msg.parsedMessage?.text
+                                                ? msg.parsedMessage
+                                                : { text: msg.plainText ?? msg.message }
+                                        )
+                                        : <p>{msg.message}</p>}
                                 </div>
                             </div>
                         ))}
+
                     </div>
 
                     <div className="inputField w-full flex absolute bottom-0">
                         <input
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
-                            className='p-2 px-4 border-none outline-none flex-grow' type="text" placeholder='Enter message' />
+                            className='p-2 px-4 border-none outline-none flex-grow' type="text"
+                            placeholder='Enter message' />
+
                         <button
                             onClick={send}
-                            className='px-5 bg-slate-950 text-white'><i className="ri-send-plane-fill"></i></button>
+                            className='px-5 bg-slate-950 text-white'>
+                            <i className="ri-send-plane-fill"></i>
+                        </button>
                     </div>
                 </div>
-                <div className={`sidePanel w-full h-full flex flex-col gap-2 bg-slate-50 absolute transition-all ${isSidePanelOpen ? 'translate-x-0' : '-translate-x-full'} top-0`}>
+
+                {/* SIDEPANEL */}
+                <div className={`sidePanel w-full h-full flex flex-col gap-2 bg-slate-50 absolute transition-all 
+                    ${isSidePanelOpen ? 'translate-x-0' : '-translate-x-full'} top-0`}>
+
                     <header className='flex justify-between items-center px-4 p-2 bg-slate-200'>
-
-                        <h1
-                            className='font-semibold text-lg'
-                        >Collaborators</h1>
-
-                        <button onClick={() => setIsSidePanelOpen(!isSidePanelOpen)} className='p-2'>
+                        <h1 className='font-semibold text-lg'>Collaborators</h1>
+                        <button onClick={() => setIsSidePanelOpen(false)} className='p-2'>
                             <i className="ri-close-fill"></i>
                         </button>
                     </header>
+
                     <div className="users flex flex-col gap-2">
-
-                        {project.users && project.users.map(user => {
-
-
-                            return (
-                                <div className="user cursor-pointer hover:bg-slate-200 p-2 flex gap-2 items-center">
-                                    <div className='aspect-square rounded-full w-fit h-fit flex items-center justify-center p-5 text-white bg-slate-600'>
-                                        <i className="ri-user-fill absolute"></i>
-                                    </div>
-                                    <h1 className='font-semibold text-lg'>{user.email}</h1>
+                        {project.users?.map(u => (
+                            <div key={u._id} className="user cursor-pointer hover:bg-slate-200 p-2 flex gap-2 items-center">
+                                <div className='aspect-square rounded-full w-fit h-fit flex items-center justify-center p-5 text-white bg-slate-600'>
+                                    <i className="ri-user-fill absolute"></i>
                                 </div>
-                            )
-
-
-                        })}
+                                <h1 className='font-semibold text-lg'>{u.email}</h1>
+                            </div>
+                        ))}
                     </div>
+
                 </div>
             </section>
 
-            <section className="right  bg-red-50 flex-grow h-full flex">
+            {/* RIGHT SIDE */}
+            <section className="right bg-red-50 flex-grow h-full flex">
 
+                {/* EXPLORER */}
                 <div className="explorer h-full max-w-64 min-w-52 bg-slate-200">
                     <div className="file-tree w-full">
-                        {
-                            Object.keys(fileTree).map((file, index) => (
-                                <button
-                                    key={index}
-                                    onClick={() => {
-                                        setCurrentFile(file)
-                                        setOpenFiles([ ...new Set([ ...openFiles, file ]) ])
-                                    }}
-                                    className="tree-element cursor-pointer p-2 px-4 flex items-center gap-2 bg-slate-300 w-full">
-                                    <p
-                                        className='font-semibold text-lg'
-                                    >{file}</p>
-                                </button>))
-
-                        }
+                        {Object.keys(fileTree).map((file, index) => (
+                            <button
+                                key={index}
+                                onClick={() => {
+                                    setCurrentFile(file)
+                                    setOpenFiles([...new Set([...openFiles, file])])
+                                }}
+                                className="tree-element cursor-pointer p-2 px-4 flex items-center gap-2 bg-slate-300 w-full">
+                                <p className='font-semibold text-lg'>{file}</p>
+                            </button>
+                        ))}
                     </div>
-
                 </div>
 
-
+                {/* CODE EDITOR */}
                 <div className="code-editor flex flex-col flex-grow h-full shrink">
 
                     <div className="top flex justify-between w-full">
 
                         <div className="files flex">
-                            {
-                                openFiles.map((file, index) => (
-                                    <button
-                                        key={index}
-                                        onClick={() => setCurrentFile(file)}
-                                        className={`open-file cursor-pointer p-2 px-4 flex items-center w-fit gap-2 bg-slate-300 ${currentFile === file ? 'bg-slate-400' : ''}`}>
-                                        <p
-                                            className='font-semibold text-lg'
-                                        >{file}</p>
-                                    </button>
-                                ))
-                            }
+                            {openFiles.map((file, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => setCurrentFile(file)}
+                                    className={`open-file cursor-pointer p-2 px-4 flex items-center w-fit gap-2 bg-slate-300 
+                                    ${currentFile === file ? 'bg-slate-400' : ''}`}>
+                                    <p className='font-semibold text-lg'>{file}</p>
+                                </button>
+                            ))}
                         </div>
 
                         <div className="actions flex gap-2">
@@ -331,123 +301,113 @@ useEffect(() => {
                                 onClick={async () => {
                                     await webContainer.mount(fileTree)
 
-
-                                    const installProcess = await webContainer.spawn("npm", [ "install" ])
-
-
-
+                                    const installProcess = await webContainer.spawn("npm", ["install"])
                                     installProcess.output.pipeTo(new WritableStream({
-                                        write(chunk) {
-                                            console.log(chunk)
-                                        }
+                                        write(chunk) { console.log(chunk) }
                                     }))
 
-                                    if (runProcess) {
-                                        runProcess.kill()
-                                    }
+                                    if (runProcess) runProcess.kill()
 
-                                    let tempRunProcess = await webContainer.spawn("npm", [ "start" ]);
-
+                                    let tempRunProcess = await webContainer.spawn("npm", ["start"])
                                     tempRunProcess.output.pipeTo(new WritableStream({
-                                        write(chunk) {
-                                            console.log(chunk)
-                                        }
+                                        write(chunk) { console.log(chunk) }
                                     }))
 
                                     setRunProcess(tempRunProcess)
 
                                     webContainer.on('server-ready', (port, url) => {
-                                        console.log(port, url)
                                         setIframeUrl(url)
                                     })
                                 }}
-                                className='p-2 px-4 bg-slate-300 text-white' >
+                                className='p-2 px-4 bg-slate-300 text-white'>
                                 run
                             </button>
-
-
                         </div>
                     </div>
+
                     <div className="bottom flex flex-grow max-w-full shrink overflow-auto">
-                        {
-                            fileTree[ currentFile ] && (
-                                <div className="code-editor-area h-full overflow-auto flex-grow bg-slate-50">
-                                    <pre
-                                        className="hljs h-full">
-                                        <code
-                                            className="hljs h-full outline-none"
-                                            contentEditable
-                                            suppressContentEditableWarning
-                                           onBlur={(e) => {
-    const updatedContent = e.target.innerText;
-    const ft = {
-        ...fileTree,
-        [ currentFile ]: {
-            file: {
-                contents: updatedContent
-            }
-        }
-    }
-    setFileTree(ft)
-    saveFileTree(ft)
-}}
-
-                                            dangerouslySetInnerHTML={{ __html: hljs.highlight('javascript', fileTree[ currentFile ].file.contents).value }}
-                                            style={{
-                                                whiteSpace: 'pre-wrap',
-                                                paddingBottom: '25rem',
-                                                counterSet: 'line-numbering',
-                                            }}
-                                        />
-                                    </pre>
-                                </div>
-                            )
-                        }
+                        {fileTree[currentFile] && (
+                            <div className="code-editor-area h-full overflow-auto flex-grow bg-slate-50">
+                                <pre className="hljs h-full">
+                                    <code
+                                        className="hljs h-full outline-none"
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onBlur={(e) => {
+                                            const updatedContent = e.target.textContent;
+                                            const ft = {
+                                                ...fileTree,
+                                                [currentFile]: {
+                                                    file: { contents: updatedContent }
+                                                }
+                                            };
+                                            setFileTree(ft)
+                                            saveFileTree(ft)
+                                        }}
+                                        dangerouslySetInnerHTML={{
+                                            __html: hljs.highlight('javascript', fileTree[currentFile].file.contents).value
+                                        }}
+                                        style={{
+                                            whiteSpace: 'pre-wrap',
+                                            paddingBottom: '25rem',
+                                            counterSet: 'line-numbering',
+                                        }}
+                                    />
+                                </pre>
+                            </div>
+                        )}
                     </div>
-
                 </div>
 
-                {iframeUrl && webContainer &&
-                    (<div className="flex min-w-96 flex-col h-full">
+                {/* PREVIEW IFRAME */}
+                {iframeUrl && (
+                    <div className="flex min-w-96 flex-col h-full">
                         <div className="address-bar">
-                            <input type="text"
+                            <input
+                                type="text"
+                                value={iframeUrl}
                                 onChange={(e) => setIframeUrl(e.target.value)}
-                                value={iframeUrl} className="w-full p-2 px-4 bg-slate-200" />
+                                className="w-full p-2 px-4 bg-slate-200"
+                            />
                         </div>
                         <iframe src={iframeUrl} className="w-full h-full"></iframe>
-                    </div>)
-                }
-
-
+                    </div>
+                )}
             </section>
 
+            {/* MODAL */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
                     <div className="bg-white p-4 rounded-md w-96 max-w-full relative">
+
                         <header className='flex justify-between items-center mb-4'>
                             <h2 className='text-xl font-semibold'>Select User</h2>
                             <button onClick={() => setIsModalOpen(false)} className='p-2'>
                                 <i className="ri-close-fill"></i>
                             </button>
                         </header>
-                        <div className="users-list flex flex-col gap-2 mb-16 max-h-96 overflow-auto">
-                            {users.map(user => (
-                                <div key={user.id} className={`user cursor-pointer hover:bg-slate-200 ${Array.from(selectedUserId).indexOf(user._id) != -1 ? 'bg-slate-200' : ""} p-2 flex gap-2 items-center`} onClick={() => handleUserClick(user._id)}>
-                                    <div className='aspect-square relative rounded-full w-fit h-fit flex items-center justify-center p-5 text-white bg-slate-600'>
-                                        <i className="ri-user-fill absolute"></i>
-                                    </div>
-                                    <h1 className='font-semibold text-lg'>{user.email}</h1>
+
+                        <div className="flex flex-col gap-2 max-h-96 overflow-auto">
+                            {users.map(u => (
+                                <div
+                                    key={u._id}
+                                    onClick={() => handleUserClick(u._id)}
+                                    className={`p-2 border cursor-pointer rounded-md ${selectedUserId.has(u._id) ? 'bg-slate-200' : ''}`}>
+                                    {u.email}
                                 </div>
                             ))}
                         </div>
+
                         <button
                             onClick={addCollaborators}
-                            className='absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-blue-600 text-white rounded-md'>
-                            Add Collaborators
+                            className="w-full mt-4 p-2 bg-slate-900 text-white rounded-md">
+                            Add
                         </button>
+
                     </div>
                 </div>
             )}
+
         </main>
     )
 }
