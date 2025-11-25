@@ -141,11 +141,16 @@ const Home = () => {
             ) : projects.length === 0 ? (
                 <p>No projects found</p>
             ) : (
-                <div className="projects flex flex-wrap gap-3">
-                    {projects.map((project) => (
-                        <ProjectCard key={project._id || Math.random()} project={project} onOpen={openProject} />
-                    ))}
-                </div>
+               <div className="projects flex flex-wrap gap-3">
+  {projects.map((project, index) => (
+    <ProjectCard
+      key={project._id ?? index} // use index only if _id is missing
+      project={project}
+      onOpen={openProject}
+    />
+  ))}
+</div>
+
             )}
 
             <CreateProjectModal

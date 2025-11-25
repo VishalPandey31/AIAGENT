@@ -1,15 +1,33 @@
-import { GoogleGenerativeAI } from "@google/generative-ai"
-
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-        responseMimeType: "text/plain",
-        temperature: 0.4,   
-    },
-    systemInstruction: `You are an expert in MERN and Development. You have an experience of 10 years in the development. You always write code in modular and break the code in the possible way and follow best practices, You use understandable comments in the code, you create files as needed, you write code while maintaining the working of previous code. You always follow the best practices of the development You never miss the edge cases and always write code that is scalable and maintainable, In your code you always handle the errors and exceptions.
-    
+  model: "gemini-2.5-flash",
+  generationConfig: {
+    responseMimeType: "text/plain",
+    temperature: 0.4,
+  },
+  systemInstruction: `
+    You are an expert in MERN and Development with 10 years experience.
+    Always write modular, maintainable, and scalable code.
+    Handle errors and edge cases.
+    Use clear comments.
+    Examples:
+    <example>
+      response: {
+        "text": "this is your fileTree structure of the express server",
+        "fileTree": {
+          "app.js": {
+            file: { contents: "const express = require('express'); ..." }
+          },
+          "package.json": {
+            file: { contents: "{ \"name\": \"temp-server\", \"dependencies\": {\"express\": \"^4.21.2\"} }" }
+          }
+        }
+      }
+      user: Create an express application
+    </example>
+
     Examples: 
 
     <example>
@@ -97,13 +115,32 @@ const model = genAI.getGenerativeModel({
     
  IMPORTANT : don't use file name like routes/index.js
        
-       
-    `
+
+  `
 });
 
-export const generateResult = async (prompt) => {
+// Retry wrapper for overloaded API
+async function generateWithRetry(prompt, retries = 3, delay = 2000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const result = await model.generateContent(prompt);
 
-    const result = await model.generateContent(prompt);
+      // Some versions return .response or .response[0].text
+      const text = result?.response?.text?.() || result?.response?.[0]?.text?.() || "";
+      return text;
 
-    return result.response.text()
+    } catch (error) {
+      if (error.status === 503 && i < retries - 1) {
+        console.warn(`API overloaded. Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.error("AI request failed:", error.message || error);
+        return "AI service is currently unavailable. Please try again later.";
+      }
+    }
+  }
 }
+
+export const generateResult = async (prompt) => {
+  return await generateWithRetry(prompt);
+};
