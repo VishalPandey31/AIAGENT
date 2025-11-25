@@ -62,7 +62,6 @@ const Project = () => {
     const [webContainer, setWebContainer] = useState(null)
     const [iframeUrl, setIframeUrl] = useState(null)
     const [runProcess, setRunProcess] = useState(null)
-const [webContainer, setWebContainer] = useState(null);
 
 
     const handleUserClick = (id) => {
