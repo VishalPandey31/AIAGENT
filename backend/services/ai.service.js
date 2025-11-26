@@ -130,16 +130,21 @@ async function generateWithRetry(prompt, retries = 3, delay = 2000) {
       return text;
 
     } catch (error) {
-      if (error.status === 503 && i < retries - 1) {
+      // If API is overloaded, retry
+      if (error?.status === 503 && i < retries - 1) {
         console.warn(`API overloaded. Retrying in ${delay}ms...`);
         await new Promise(r => setTimeout(r, delay));
       } else {
-        console.error("AI request failed:", error.message || error);
+        // ❌ SAFE LOGGING: never print error.message (may contain API key)
+        console.error("Gemini API Error:", error?.status || error?.code || "Unknown error");
+
+        // Return generic message to frontend
         return "AI service is currently unavailable. Please try again later.";
       }
     }
   }
 }
+
 
 export const generateResult = async (prompt) => {
   return await generateWithRetry(prompt);
